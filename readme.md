@@ -32,15 +32,7 @@ This repository contains a NoSQL database implementation for a task management s
 
 Below are the MongoDB queries used to demonstrate the implementation of each requirement.
 
-### 2.4 Sufficient Attributes Available (≥8)
-
-```javascript
-// Show a task document and count its attributes
-db.tasks.findOne();
-Object.keys(db.tasks.findOne()).length;
-```
-
-### 2.5 Physical Data Model, Data Insertion
+### 2.4 Physical Data Model, Data Insertion
 
 ```javascript
 // Insert a new task with all required attributes
@@ -58,7 +50,7 @@ db.tasks.insertOne({
 });
 ```
 
-### 2.6 Modify and Delete Data for All Entity Types
+### 2.5 Modify and Delete Data for All Entity Types
 
 ```javascript
 // Update a task
@@ -83,25 +75,7 @@ db.tags.updateOne(
 db.tasks.deleteOne({ title: "Demo for class" });
 ```
 
-### 2.7 Not All Entities Contain the Same Attributes
-
-```javascript
-// Add custom fields to only some tasks
-db.tasks.updateMany(
-  { priority: "high" },
-  { $set: { is_flagged: true } }
-);
-
-// Show tasks with and without the custom field
-db.tasks.find({ is_flagged: true }).limit(1);
-db.tasks.find({ is_flagged: { $exists: false } }).limit(1);
-
-// Count how many have the field and how many don't
-db.tasks.countDocuments({ is_flagged: true });
-db.tasks.countDocuments({ is_flagged: { $exists: false } });
-```
-
-### 2.8 Display Data, Individual + Aggregation
+### 2.6 Display Data, Individual + Aggregation
 
 ```javascript
 // Show a single task with all details
@@ -145,7 +119,7 @@ db.tasks.aggregate([
 ]);
 ```
 
-### 2.9 Sufficient Data Available (≥20 Objects per Type)
+### 2.7 Sufficient Data Available (≥20 Objects per Type)
 
 ```javascript
 // Count documents in each collection
