@@ -28,19 +28,6 @@ This repository contains a NoSQL database implementation for a task management s
 - **created_at**: Date
 - **tasks**: Array of ObjectIds (references to Tasks)
 
-## Project Requirements
-
-The implementation satisfies the following criteria:
-
-| Nr. | Criterion | Type | Points |
-|-----|-----------|------|--------|
-| 2.4 | Sufficient attributes available (main entity ≥8) | Demo | 3 |
-| 2.5 | Physical data model, data insertion | Demo | 3 |
-| 2.6 | Modify and delete data for all entity types | Demo | 3 |
-| 2.7 | Not all entities contain the same attributes | Demo | 3 |
-| 2.8 | Display data, individual + aggregation | Demo | 3 |
-| 2.9 | Sufficient data available (≥20 objects per type) | Demo | 3 |
-
 ## Demo Queries
 
 Below are the MongoDB queries used to demonstrate the implementation of each requirement.
