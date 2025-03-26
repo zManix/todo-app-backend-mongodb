@@ -238,3 +238,29 @@ Where the relationships are:
 - A Folder can contain multiple Tasks
 - A Task can have multiple Tags
 - A Tag can be applied to multiple Tasks
+
+
+## Replication
+To replicate the database first create a mongo-keyfile:
+```bash
+openssl rand -base64 741 > mongo-keyfile
+chmod 400 mongo-keyfile
+chown 999:999 mongo-keyfile
+```
+
+Then start the docker-compose:
+```
+docker-compose up -d
+```
+
+## Backup and Restore
+
+To backup the database, use the following command:
+```bash
+mongodump --host localhost --port 27017 --db m165 --username root --password root --authenticationDatabase admin --out ./backup/$(date +%Y-%m-%d)
+```
+
+To restore the database, use the following command:
+```bash
+mongorestore --host localhost --port 27017 --db m165_restore --username root --password root --authenticationDatabase admin ./backup/2025-03-26/m165
+```

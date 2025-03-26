@@ -1,0 +1,98 @@
+# Define common configuration using YAML anchor
+x-mongo-common: &mongo-common
+  image: mongo:latest
+  command:
+    [
+      "--replSet",
+      "rs0",
+      "--bind_ip_all",
+      "--port",
+      "27017",
+      "--keyFile",
+      "/data/keyfile",
+    ]
+  restart: always
+  environment:
+    MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-admin}
+    MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-password}
+  networks:
+    - mongo_network
+  healthcheck:
+    test: mongosh --eval 'db.adminCommand("ping").ok' localhost:27017/admin --quiet
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 40s
+services:
+  # MongoDB Replica Set nodes
+  mongo1:
+    <<: *mongo-common
+    container_name: mongo1
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo1_data:/data/db
+      - mongo1_config:/data/configdb
+      - ./mongo-keyfile:/data/keyfile:ro
+  mongo2:
+    <<: *mongo-common
+    container_name: mongo2
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo2_data:/data/db
+      - mongo2_config:/data/configdb
+      - ./mongo-keyfile:/data/keyfile:ro
+    depends_on:
+      - mongo1
+  mongo3:
+    <<: *mongo-common
+    container_name: mongo3
+    ports:
+      - "27019:27017"
+    volumes:
+      - mongo3_data:/data/db
+      - mongo3_config:/data/configdb
+      - ./mongo-keyfile:/data/keyfile:ro
+    depends_on:
+      - mongo1
+  # Service to initialize the replica set
+  mongo-init:
+    container_name: mongo-init
+    image: mongo:latest
+    restart: "no"
+    entrypoint: >
+      bash -c "
+        echo 'Waiting for MongoDB servers to be ready...'
+        sleep 15
+        mongosh --host mongo1:27017 -u $${MONGO_ROOT_USER} -p $${MONGO_ROOT_PASSWORD} --authenticationDatabase admin --eval '
+          rs.initiate({
+            _id: \"rs0\",
+            members: [
+              { _id: 0, host: \"mongo1:27017\", priority: 2 },
+              { _id: 1, host: \"mongo2:27017\", priority: 1 },
+              { _id: 2, host: \"mongo3:27017\", priority: 1 }
+            ]
+          })
+        '
+        echo 'Replica set initialized.'
+      "
+    environment:
+      MONGO_ROOT_USER: ${MONGO_ROOT_USER:-admin}
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-password}
+    networks:
+      - mongo_network
+    depends_on:
+      - mongo1
+      - mongo2
+      - mongo3
+volumes:
+  mongo1_data:
+  mongo1_config:
+  mongo2_data:
+  mongo2_config:
+  mongo3_data:
+  mongo3_config:
+networks:
+  mongo_network:
+    driver: bridge

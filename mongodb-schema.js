@@ -1,6 +1,7 @@
 // MongoDB Schema and Sample Data Creation
 // Complete script with no placeholders
 
+use("m165")
 // 1. Drop existing collections if they exist
 db.tasks.drop();
 db.folders.drop();
