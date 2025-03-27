@@ -1,13 +1,15 @@
 const express = require('express');
 const { MongoClient } = require('mongodb');
 const taskRoutes = require('./routes/taskRoutes'); // Import the routes
+const cors = require('cors');
 
 const app = express();
 const port = process.env.PORT || 3000;
-const MONGODB_URI = 'mongodb://localhost:27018/task_manager';
+const MONGODB_URI = 'mongodb://root:root@localhost:27017/m165?authSource=admin&directConnection=true';
 
 // Middleware
 app.use(express.json());
+app.use(cors())
 
 // Database connection middleware
 app.use(async (req, res, next) => {

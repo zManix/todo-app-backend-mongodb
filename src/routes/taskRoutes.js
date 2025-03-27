@@ -1,195 +1,13 @@
 const express = require('express');
-const { MongoClient, ObjectId } = require('mongodb');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-
+const { ObjectId } = require('mongodb');
 const router = express.Router();
-const JWT_SECRET = 'your_jwt_secret'; // Use environment variable in production
-
-// Authentication middleware
-const authenticate = async (req, res, next) => {
-  try {
-    const token = req.header('Authorization').replace('Bearer ', '');
-    const decoded = jwt.verify(token, JWT_SECRET);
-    
-    const user = await req.db.collection('users').findOne({ _id: new ObjectId(decoded.userId) });
-    if (!user) throw new Error();
-    
-    req.user = user;
-    req.userId = user._id;
-    next();
-  } catch (error) {
-    res.status(401).json({ error: 'Please authenticate' });
-  }
-};
-
-// Authorization middleware
-const authorize = (resourceType, action) => {
-  return async (req, res, next) => {
-    try {
-      const user = req.user;
-      const roles = await req.db.collection('roles').find({ 
-        _id: { $in: user.roles.map(id => new ObjectId(id)) }
-      }).toArray();
-      
-      const hasPermission = roles.some(role => 
-        role.permissions[resourceType] && 
-        role.permissions[resourceType][action] === true
-      );
-      
-      if (!hasPermission) {
-        return res.status(403).json({ error: 'Not authorized to perform this action' });
-      }
-      
-      next();
-    } catch (error) {
-      res.status(500).json({ error: 'Server error during authorization check' });
-    }
-  };
-};
-
-// ==================== USER ROUTES ====================
-
-// Login
-router.post('/login', async (req, res) => {
-  try {
-    const { username, password } = req.body;
-    const user = await req.db.collection('users').findOne({ username });
-    
-    if (!user) {
-      return res.status(401).json({ error: 'Invalid login credentials' });
-    }
-    
-    // In a real app, use bcrypt.compare(password, user.password_hash)
-    const isMatch = password === user.password_hash.replace('$2a$10$XYZ...', '');
-    
-    if (!isMatch) {
-      return res.status(401).json({ error: 'Invalid login credentials' });
-    }
-    
-    // Update last login time
-    await req.db.collection('users').updateOne(
-      { _id: user._id },
-      { $set: { last_login: new Date() }}
-    );
-    
-    const token = jwt.sign({ userId: user._id.toString() }, JWT_SECRET, { expiresIn: '24h' });
-    res.json({ token, user: { username: user.username, email: user.email } });
-    
-  } catch (error) {
-    res.status(500).json({ error: 'Server error during login' });
-  }
-});
-
-// Get users (Admin only)
-router.get('/users', authenticate, authorize('users', 'read'), async (req, res) => {
-  try {
-    const users = await req.db.collection('users').find({}, {
-      projection: { password_hash: 0 }
-    }).toArray();
-    
-    // Add role info to each user
-    const usersWithRoles = await Promise.all(users.map(async (user) => {
-      const roles = await req.db.collection('roles').find({ 
-        _id: { $in: user.roles.map(id => new ObjectId(id)) }
-      }).toArray();
-      
-      return {
-        ...user,
-        roleNames: roles.map(r => r.name)
-      };
-    }));
-    
-    res.json(usersWithRoles);
-  } catch (error) {
-    res.status(500).json({ error: 'Server error while fetching users' });
-  }
-});
-
-// Create user (Admin only)
-router.post('/users', authenticate, authorize('users', 'create'), async (req, res) => {
-  try {
-    const { username, email, password, roleNames } = req.body;
-    
-    // Check if user already exists
-    const existingUser = await req.db.collection('users').findOne({
-      $or: [{ username }, { email }]
-    });
-    
-    if (existingUser) {
-      return res.status(400).json({ error: 'Username or email already exists' });
-    }
-    
-    // Find role IDs
-    const roles = await req.db.collection('roles').find({ name: { $in: roleNames } }).toArray();
-    if (roles.length !== roleNames.length) {
-      return res.status(400).json({ error: 'One or more roles not found' });
-    }
-    
-    // Hash password (use in production)
-    // const passwordHash = await bcrypt.hash(password, 10);
-    const passwordHash = `$2a$10$XYZ...${password}`;
-    
-    const newUser = {
-      username,
-      email,
-      password_hash: passwordHash,
-      roles: roles.map(r => r._id),
-      created_at: new Date()
-    };
-    
-    const result = await req.db.collection('users').insertOne(newUser);
-    
-    res.status(201).json({
-      _id: result.insertedId,
-      username,
-      email,
-      roles: roleNames
-    });
-    
-  } catch (error) {
-    res.status(500).json({ error: 'Server error while creating user' });
-  }
-});
-
-// Get user by ID
-router.get('/users/:id', authenticate, async (req, res) => {
-  try {
-    // Check if user has permission
-    const isAdmin = await authorize('users', 'read')(req, res, () => true);
-    if (!isAdmin && req.userId.toString() !== req.params.id) {
-      return res.status(403).json({ error: 'Not authorized to view this user' });
-    }
-    
-    const user = await req.db.collection('users').findOne(
-      { _id: new ObjectId(req.params.id) },
-      { projection: { password_hash: 0 }}
-    );
-    
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    
-    const roles = await req.db.collection('roles').find({ 
-      _id: { $in: user.roles.map(id => new ObjectId(id)) }
-    }).toArray();
-    
-    res.json({
-      ...user,
-      roleNames: roles.map(r => r.name)
-    });
-    
-  } catch (error) {
-    res.status(500).json({ error: 'Server error while fetching user' });
-  }
-});
 
 // ==================== TASK ROUTES ====================
 
 // Get all tasks (with filtering)
-router.get('/tasks', authenticate, authorize('tasks', 'read'), async (req, res) => {
+router.get('/tasks', async (req, res) => {
   try {
-    const { status, priority, folder, tag, assigned_to } = req.query;
+    const { status, priority, folder, tag } = req.query;
     let filter = {};
     
     // Apply filters if provided
@@ -197,32 +15,6 @@ router.get('/tasks', authenticate, authorize('tasks', 'read'), async (req, res) 
     if (priority) filter.priority = priority;
     if (folder) filter.folders = new ObjectId(folder);
     if (tag) filter.tags = new ObjectId(tag);
-    if (assigned_to) filter.assigned_user = assigned_to;
-    
-    // Check if user is admin/manager or regular user
-    const user = req.user;
-    const roles = await req.db.collection('roles').find({ 
-      _id: { $in: user.roles.map(id => new ObjectId(id)) }
-    }).toArray();
-    
-    const isAdminOrManager = roles.some(role => 
-      ["Admin", "Manager"].includes(role.name)
-    );
-    
-    // Regular users can only see assigned tasks
-    if (!isAdminOrManager) {
-      filter = {
-        $and: [
-          filter,
-          {
-            $or: [
-              { assigned_user: user.email },
-              { owner: user._id }
-            ]
-          }
-        ]
-      };
-    }
     
     const tasks = await req.db.collection('tasks').find(filter).toArray();
     
@@ -257,101 +49,151 @@ router.get('/tasks', authenticate, authorize('tasks', 'read'), async (req, res) 
   }
 });
 
-// Create task
-router.post('/tasks', authenticate, authorize('tasks', 'create'), async (req, res) => {
-  try {
-    const { title, description, status, due_date, priority, assigned_user, folders, tags } = req.body;
-    
-    // Validate input
-    if (!title || !status || !priority) {
-      return res.status(400).json({ error: 'Title, status and priority are required' });
-    }
-    
-    // Convert string IDs to ObjectIds
-    let folderIds = [];
-    let tagIds = [];
-    
-    if (folders && folders.length > 0) {
-      folderIds = folders.map(id => new ObjectId(id));
-    }
-    
-    if (tags && tags.length > 0) {
-      tagIds = tags.map(id => new ObjectId(id));
-    }
-    
-    const task = {
-      title,
-      description,
-      status,
-      due_date: due_date ? new Date(due_date) : null,
-      priority,
-      assigned_user,
-      created_at: new Date(),
-      updated_at: new Date(),
-      folders: folderIds,
-      tags: tagIds,
-      owner: req.userId
-    };
-    
-    const result = await req.db.collection('tasks').insertOne(task);
-    
-    // Update folder and tag references
-    if (folderIds.length > 0) {
-      await req.db.collection('folders').updateMany(
-        { _id: { $in: folderIds } },
-        { $push: { tasks: result.insertedId } }
-      );
-    }
-    
-    if (tagIds.length > 0) {
-      await req.db.collection('tags').updateMany(
-        { _id: { $in: tagIds } },
-        { $push: { tasks: result.insertedId } }
-      );
-    }
-    
-    res.status(201).json({ _id: result.insertedId, ...task });
-    
-  } catch (error) {
-    res.status(500).json({ error: 'Server error while creating task' });
-  }
-});
-
-// Update task
-router.put('/tasks/:id', authenticate, authorize('tasks', 'update'), async (req, res) => {
+// Get task by ID
+router.get('/tasks/:id', async (req, res) => {
   try {
     const taskId = new ObjectId(req.params.id);
-    const updates = req.body;
     const task = await req.db.collection('tasks').findOne({ _id: taskId });
     
     if (!task) {
       return res.status(404).json({ error: 'Task not found' });
     }
     
-    // Check if user can update this specific task
-    const user = req.user;
-    const roles = await req.db.collection('roles').find({ 
-      _id: { $in: user.roles.map(id => new ObjectId(id)) }
-    }).toArray();
+    // Add folder and tag details
+    let folderDetails = [];
+    let tagDetails = [];
     
-    const isAdminOrManager = roles.some(role => 
-      ["Admin", "Manager"].includes(role.name)
-    );
-    
-    if (!isAdminOrManager && 
-        task.assigned_user !== user.email && 
-        (!task.owner || !task.owner.equals(user._id))) {
-      return res.status(403).json({ error: 'Not authorized to update this task' });
+    if (task.folders && task.folders.length > 0) {
+      folderDetails = await req.db.collection('folders').find({
+        _id: { $in: task.folders }
+      }).toArray();
     }
     
-    // Handle folder and tag updates
-    if (updates.folders) {
+    if (task.tags && task.tags.length > 0) {
+      tagDetails = await req.db.collection('tags').find({
+        _id: { $in: task.tags }
+      }).toArray();
+    }
+    
+    const taskWithDetails = {
+      ...task,
+      folderDetails: folderDetails.map(f => ({ id: f._id, name: f.name })),
+      tagDetails: tagDetails.map(t => ({ id: t._id, name: t.name, color: t.color }))
+    };
+    
+    res.json(taskWithDetails);
+    
+  } catch (error) {
+    res.status(500).json({ error: 'Server error while fetching task' });
+  }
+});
+
+// Create task
+router.post('/tasks', async (req, res) => {
+  try {
+    const { title, description, status, due_date, priority, folders, tags } = req.body;
+    
+    // Validate input
+    if (!title || !status) {
+      return res.status(400).json({ error: 'Title and status are required' });
+    }
+    
+    // Convert string IDs to ObjectIds, but handle empty arrays and null values properly
+    let folderIds = [];
+    let tagIds = [];
+    
+    if (folders && Array.isArray(folders) && folders.length > 0) {
+      folderIds = folders.map(id => {
+        try {
+          return new ObjectId(id);
+        } catch (err) {
+          console.error(`Invalid folder ID format: ${id}`);
+          return null;
+        }
+      }).filter(id => id !== null);
+    }
+    
+    if (tags && Array.isArray(tags) && tags.length > 0) {
+      tagIds = tags.map(id => {
+        try {
+          return new ObjectId(id);
+        } catch (err) {
+          console.error(`Invalid tag ID format: ${id}`);
+          return null;
+        }
+      }).filter(id => id !== null);
+    }
+    
+    const task = {
+      title,
+      description: description || "",
+      status,
+      due_date: due_date ? new Date(due_date) : null,
+      priority: priority || "medium",
+      created_at: new Date(),
+      updated_at: new Date(),
+      folders: folderIds,
+      tags: tagIds
+    };
+    
+    const result = await req.db.collection('tasks').insertOne(task);
+    
+    // Update folder and tag references only if we have valid IDs
+    if (folderIds.length > 0) {
+      await req.db.collection('folders').updateMany(
+        { _id: { $in: folderIds } },
+        { $addToSet: { tasks: result.insertedId } } // Use addToSet to avoid duplicates
+      );
+    }
+    
+    if (tagIds.length > 0) {
+      await req.db.collection('tags').updateMany(
+        { _id: { $in: tagIds } },
+        { $addToSet: { tasks: result.insertedId } } // Use addToSet to avoid duplicates
+      );
+    }
+    
+    // Return the created task with its ID
+    const createdTask = {
+      _id: result.insertedId,
+      ...task
+    };
+    
+    res.status(201).json(createdTask);
+    
+  } catch (error) {
+    console.error('Error creating task:', error);
+    res.status(500).json({ error: 'Server error while creating task' });
+  }
+});
+
+// Update task
+router.put('/tasks/:id', async (req, res) => {
+  try {
+    const taskId = new ObjectId(req.params.id);
+    const updates = { ...req.body };
+    const task = await req.db.collection('tasks').findOne({ _id: taskId });
+    
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+    
+    // Handle folder updates
+    if (updates.folders !== undefined) {
       const oldFolderIds = task.folders || [];
-      const newFolderIds = updates.folders.map(id => new ObjectId(id));
+      // Convert string IDs to ObjectIds and filter out any invalid IDs
+      const newFolderIds = Array.isArray(updates.folders) ? 
+        updates.folders
+          .filter(id => id) // Remove null/empty values
+          .map(id => {
+            try { return new ObjectId(id); } 
+            catch (e) { return null; }
+          })
+          .filter(id => id !== null) : [];
       
       // Remove task from folders that are no longer associated
-      const removedFolders = oldFolderIds.filter(id => 
-        !newFolderIds.some(newId => newId.equals(id))
+      const removedFolders = oldFolderIds.filter(oldId => 
+        !newFolderIds.some(newId => newId.toString() === oldId.toString())
       );
       
       if (removedFolders.length > 0) {
@@ -362,27 +204,36 @@ router.put('/tasks/:id', authenticate, authorize('tasks', 'update'), async (req,
       }
       
       // Add task to newly associated folders
-      const addedFolders = newFolderIds.filter(id => 
-        !oldFolderIds.some(oldId => oldId.equals(id))
+      const addedFolders = newFolderIds.filter(newId => 
+        !oldFolderIds.some(oldId => oldId.toString() === newId.toString())
       );
       
       if (addedFolders.length > 0) {
         await req.db.collection('folders').updateMany(
           { _id: { $in: addedFolders } },
-          { $push: { tasks: taskId } }
+          { $addToSet: { tasks: taskId } }
         );
       }
       
       updates.folders = newFolderIds;
     }
     
-    if (updates.tags) {
+    // Handle tag updates
+    if (updates.tags !== undefined) {
       const oldTagIds = task.tags || [];
-      const newTagIds = updates.tags.map(id => new ObjectId(id));
+      // Convert string IDs to ObjectIds and filter out any invalid IDs
+      const newTagIds = Array.isArray(updates.tags) ? 
+        updates.tags
+          .filter(id => id) // Remove null/empty values
+          .map(id => {
+            try { return new ObjectId(id); } 
+            catch (e) { return null; }
+          })
+          .filter(id => id !== null) : [];
       
       // Remove task from tags that are no longer associated
-      const removedTags = oldTagIds.filter(id => 
-        !newTagIds.some(newId => newId.equals(id))
+      const removedTags = oldTagIds.filter(oldId => 
+        !newTagIds.some(newId => newId.toString() === oldId.toString())
       );
       
       if (removedTags.length > 0) {
@@ -393,14 +244,14 @@ router.put('/tasks/:id', authenticate, authorize('tasks', 'update'), async (req,
       }
       
       // Add task to newly associated tags
-      const addedTags = newTagIds.filter(id => 
-        !oldTagIds.some(oldId => oldId.equals(id))
+      const addedTags = newTagIds.filter(newId => 
+        !oldTagIds.some(oldId => oldId.toString() === newId.toString())
       );
       
       if (addedTags.length > 0) {
         await req.db.collection('tags').updateMany(
           { _id: { $in: addedTags } },
-          { $push: { tasks: taskId } }
+          { $addToSet: { tasks: taskId } }
         );
       }
       
@@ -409,26 +260,42 @@ router.put('/tasks/:id', authenticate, authorize('tasks', 'update'), async (req,
     
     // Convert dates if necessary
     if (updates.due_date) {
-      updates.due_date = new Date(updates.due_date);
+      try {
+        updates.due_date = new Date(updates.due_date);
+      } catch (e) {
+        updates.due_date = null;
+      }
     }
     
     // Add updated timestamp
     updates.updated_at = new Date();
     
+    // Remove any undefined or null fields
+    Object.keys(updates).forEach(key => {
+      if (updates[key] === undefined) {
+        delete updates[key];
+      }
+    });
+    
+    // Update the task
     await req.db.collection('tasks').updateOne(
       { _id: taskId },
       { $set: updates }
     );
     
-    res.json({ _id: taskId, ...task, ...updates });
+    // Get the updated task to return
+    const updatedTask = await req.db.collection('tasks').findOne({ _id: taskId });
+    
+    res.json(updatedTask);
     
   } catch (error) {
-    res.status(500).json({ error: 'Server error while updating task' });
+    console.error('Error updating task:', error);
+    res.status(500).json({ error: 'Server error while updating task', details: error.message });
   }
 });
 
 // Delete task
-router.delete('/tasks/:id', authenticate, authorize('tasks', 'delete'), async (req, res) => {
+router.delete('/tasks/:id', async (req, res) => {
   try {
     const taskId = new ObjectId(req.params.id);
     const task = await req.db.collection('tasks').findOne({ _id: taskId });
@@ -465,7 +332,7 @@ router.delete('/tasks/:id', authenticate, authorize('tasks', 'delete'), async (r
 // ==================== FOLDER ROUTES ====================
 
 // Get all folders
-router.get('/folders', authenticate, authorize('folders', 'read'), async (req, res) => {
+router.get('/folders', async (req, res) => {
   try {
     const folders = await req.db.collection('folders').find().toArray();
     res.json(folders);
@@ -474,8 +341,25 @@ router.get('/folders', authenticate, authorize('folders', 'read'), async (req, r
   }
 });
 
+// Get folder by ID
+router.get('/folders/:id', async (req, res) => {
+  try {
+    const folderId = new ObjectId(req.params.id);
+    const folder = await req.db.collection('folders').findOne({ _id: folderId });
+    
+    if (!folder) {
+      return res.status(404).json({ error: 'Folder not found' });
+    }
+    
+    res.json(folder);
+    
+  } catch (error) {
+    res.status(500).json({ error: 'Server error while fetching folder' });
+  }
+});
+
 // Create folder
-router.post('/folders', authenticate, authorize('folders', 'create'), async (req, res) => {
+router.post('/folders', async (req, res) => {
   try {
     const { name } = req.body;
     
@@ -500,7 +384,7 @@ router.post('/folders', authenticate, authorize('folders', 'create'), async (req
 });
 
 // Update folder
-router.put('/folders/:id', authenticate, authorize('folders', 'update'), async (req, res) => {
+router.put('/folders/:id', async (req, res) => {
   try {
     const folderId = new ObjectId(req.params.id);
     const { name } = req.body;
@@ -533,7 +417,7 @@ router.put('/folders/:id', authenticate, authorize('folders', 'update'), async (
 });
 
 // Delete folder
-router.delete('/folders/:id', authenticate, authorize('folders', 'delete'), async (req, res) => {
+router.delete('/folders/:id', async (req, res) => {
   try {
     const folderId = new ObjectId(req.params.id);
     const folder = await req.db.collection('folders').findOne({ _id: folderId });
@@ -562,7 +446,7 @@ router.delete('/folders/:id', authenticate, authorize('folders', 'delete'), asyn
 // ==================== TAG ROUTES ====================
 
 // Get all tags
-router.get('/tags', authenticate, authorize('tags', 'read'), async (req, res) => {
+router.get('/tags', async (req, res) => {
   try {
     const tags = await req.db.collection('tags').find().toArray();
     res.json(tags);
@@ -571,8 +455,25 @@ router.get('/tags', authenticate, authorize('tags', 'read'), async (req, res) =>
   }
 });
 
+// Get tag by ID
+router.get('/tags/:id', async (req, res) => {
+  try {
+    const tagId = new ObjectId(req.params.id);
+    const tag = await req.db.collection('tags').findOne({ _id: tagId });
+    
+    if (!tag) {
+      return res.status(404).json({ error: 'Tag not found' });
+    }
+    
+    res.json(tag);
+    
+  } catch (error) {
+    res.status(500).json({ error: 'Server error while fetching tag' });
+  }
+});
+
 // Create tag
-router.post('/tags', authenticate, authorize('tags', 'create'), async (req, res) => {
+router.post('/tags', async (req, res) => {
   try {
     const { name, color } = req.body;
     
@@ -597,7 +498,7 @@ router.post('/tags', authenticate, authorize('tags', 'create'), async (req, res)
 });
 
 // Update tag
-router.put('/tags/:id', authenticate, authorize('tags', 'update'), async (req, res) => {
+router.put('/tags/:id', async (req, res) => {
   try {
     const tagId = new ObjectId(req.params.id);
     const { name, color } = req.body;
@@ -615,6 +516,7 @@ router.put('/tags/:id', authenticate, authorize('tags', 'update'), async (req, r
     const updates = {};
     if (name) updates.name = name;
     if (color) updates.color = color;
+    updates.updated_at = new Date();
     
     await req.db.collection('tags').updateOne(
       { _id: tagId },
@@ -629,7 +531,7 @@ router.put('/tags/:id', authenticate, authorize('tags', 'update'), async (req, r
 });
 
 // Delete tag
-router.delete('/tags/:id', authenticate, authorize('tags', 'delete'), async (req, res) => {
+router.delete('/tags/:id', async (req, res) => {
   try {
     const tagId = new ObjectId(req.params.id);
     const tag = await req.db.collection('tags').findOne({ _id: tagId });
@@ -655,169 +557,129 @@ router.delete('/tags/:id', authenticate, authorize('tags', 'delete'), async (req
   }
 });
 
-// ==================== BACKUP ROUTES ====================
+// ==================== TASK AGGREGATION ROUTES ====================
 
-// Create backup
-router.post('/backups', authenticate, authorize('users', 'create'), async (req, res) => {
+// Get tasks by status (aggregation)
+router.get('/tasks-by-status', async (req, res) => {
   try {
-    const { name } = req.body;
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const backupName = name || `backup_${timestamp}`;
-    
-    // Create backup collection if not exists
-    if (!await req.db.listCollections({ name: 'backups' }).hasNext()) {
-      await req.db.createCollection('backups');
-    }
-    
-    // Gather all data for backup
-    const tasks = await req.db.collection('tasks').find().toArray();
-    const folders = await req.db.collection('folders').find().toArray();
-    const tags = await req.db.collection('tags').find().toArray();
-    const users = await req.db.collection('users').find().toArray();
-    const roles = await req.db.collection('roles').find().toArray();
-    
-    const backup = {
-      metadata: {
-        name: backupName,
-        createdAt: new Date(),
-        createdBy: req.userId,
-        version: "1.0"
+    const result = await req.db.collection('tasks').aggregate([
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 },
+          tasks: { $push: { title: '$title', _id: '$_id' } }
+        }
       },
-      tasks,
-      folders,
-      tags,
-      users,
-      roles
-    };
-    
-    const result = await req.db.collection('backups').insertOne(backup);
-    
-    res.status(201).json({
-      _id: result.insertedId,
-      name: backupName,
-      createdAt: backup.metadata.createdAt,
-      counts: {
-        tasks: tasks.length,
-        folders: folders.length,
-        tags: tags.length,
-        users: users.length,
-        roles: roles.length
+      {
+        $sort: { _id: 1 }
       }
+    ]).toArray();
+    
+    res.json(result);
+    
+  } catch (error) {
+    res.status(500).json({ error: 'Server error while aggregating tasks by status' });
+  }
+});
+
+// Get tasks by folder (aggregation)
+router.get('/tasks-by-folder', async (req, res) => {
+  try {
+    const folders = await req.db.collection('folders').find().toArray();
+    
+    // Get all tasks
+    const tasks = await req.db.collection('tasks').find().toArray();
+    
+    // Group tasks by folder
+    const tasksByFolder = folders.map(folder => {
+      const folderTasks = tasks.filter(task => 
+        task.folders && task.folders.some(folderId => 
+          folderId.toString() === folder._id.toString()
+        )
+      );
+      
+      return {
+        _id: folder._id,
+        folderName: folder.name,
+        count: folderTasks.length,
+        tasks: folderTasks.map(task => ({ _id: task._id, title: task.title }))
+      };
     });
     
+    res.json(tasksByFolder);
+    
   } catch (error) {
-    res.status(500).json({ error: 'Server error while creating backup' });
+    res.status(500).json({ error: 'Server error while aggregating tasks by folder' });
   }
 });
 
-// List backups
-router.get('/backups', authenticate, authorize('users', 'read'), async (req, res) => {
+// Get tasks by tag (aggregation)
+router.get('/tasks-by-tag', async (req, res) => {
   try {
-    const backups = await req.db.collection('backups').find().project({
-      'metadata': 1,
-      'tasksCount': { $size: '$tasks' },
-      'foldersCount': { $size: '$folders' },
-      'tagsCount': { $size: '$tags' },
-      'usersCount': { $size: '$users' },
-      'rolesCount': { $size: '$roles' }
-    }).toArray();
+    const tags = await req.db.collection('tags').find().toArray();
     
-    res.json(backups);
+    // Get all tasks
+    const tasks = await req.db.collection('tasks').find().toArray();
+    
+    // Group tasks by tag
+    const tasksByTag = tags.map(tag => {
+      const tagTasks = tasks.filter(task => 
+        task.tags && task.tags.some(tagId => 
+          tagId.toString() === tag._id.toString()
+        )
+      );
+      
+      return {
+        _id: tag._id,
+        tagName: tag.name,
+        tagColor: tag.color,
+        count: tagTasks.length,
+        tasks: tagTasks.map(task => ({ _id: task._id, title: task.title }))
+      };
+    });
+    
+    res.json(tasksByTag);
     
   } catch (error) {
-    res.status(500).json({ error: 'Server error while fetching backups' });
+    res.status(500).json({ error: 'Server error while aggregating tasks by tag' });
   }
 });
 
-// Restore from backup
-router.post('/backups/:id/restore', authenticate, authorize('users', 'create'), async (req, res) => {
+// Get tasks statistics (aggregation)
+router.get('/task-stats', async (req, res) => {
   try {
-    const backupId = new ObjectId(req.params.id);
-    const backup = await req.db.collection('backups').findOne({ _id: backupId });
+    const totalTasks = await req.db.collection('tasks').countDocuments();
     
-    if (!backup) {
-      return res.status(404).json({ error: 'Backup not found' });
-    }
+    const statusStats = await req.db.collection('tasks').aggregate([
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 }
+        }
+      }
+    ]).toArray();
     
-    const { dropCollections, includeTasks, includeFolders, includeTags, includeUsers, includeRoles } = req.body;
-    
-    // WARNING: This is destructive!
-    if (dropCollections) {
-      if (includeRoles) await req.db.collection('roles').deleteMany({});
-      if (includeUsers) await req.db.collection('users').deleteMany({});
-      if (includeTags) await req.db.collection('tags').deleteMany({});
-      if (includeFolders) await req.db.collection('folders').deleteMany({});
-      if (includeTasks) await req.db.collection('tasks').deleteMany({});
-    }
-    
-    const results = {};
-    
-    // Restore in correct order due to references
-    if (includeRoles && backup.roles) {
-      const result = await req.db.collection('roles').insertMany(
-        backup.roles.map(role => ({ ...role, _id: new ObjectId(role._id) })),
-        { ordered: false }
-      );
-      results.roles = result.insertedCount;
-    }
-    
-    if (includeUsers && backup.users) {
-      const result = await req.db.collection('users').insertMany(
-        backup.users.map(user => ({
-          ...user,
-          _id: new ObjectId(user._id),
-          roles: user.roles.map(r => new ObjectId(r))
-        })),
-        { ordered: false }
-      );
-      results.users = result.insertedCount;
-    }
-    
-    if (includeTags && backup.tags) {
-      const result = await req.db.collection('tags').insertMany(
-        backup.tags.map(tag => ({
-          ...tag,
-          _id: new ObjectId(tag._id),
-          tasks: tag.tasks ? tag.tasks.map(t => new ObjectId(t)) : []
-        })),
-        { ordered: false }
-      );
-      results.tags = result.insertedCount;
-    }
-    
-    if (includeFolders && backup.folders) {
-      const result = await req.db.collection('folders').insertMany(
-        backup.folders.map(folder => ({
-          ...folder,
-          _id: new ObjectId(folder._id),
-          tasks: folder.tasks ? folder.tasks.map(t => new ObjectId(t)) : []
-        })),
-        { ordered: false }
-      );
-      results.folders = result.insertedCount;
-    }
-    
-    if (includeTasks && backup.tasks) {
-      const result = await req.db.collection('tasks').insertMany(
-        backup.tasks.map(task => ({
-          ...task,
-          _id: new ObjectId(task._id),
-          folders: task.folders ? task.folders.map(f => new ObjectId(f)) : [],
-          tags: task.tags ? task.tags.map(t => new ObjectId(t)) : [],
-          owner: task.owner ? new ObjectId(task.owner) : null
-        })),
-        { ordered: false }
-      );
-      results.tasks = result.insertedCount;
-    }
+    // Get count by priority (if priority field exists)
+    const priorityStats = await req.db.collection('tasks').aggregate([
+      {
+        $match: { priority: { $exists: true } }
+      },
+      {
+        $group: {
+          _id: '$priority',
+          count: { $sum: 1 }
+        }
+      }
+    ]).toArray();
     
     res.json({
-      message: 'Backup restored successfully',
-      restored: results
+      totalTasks,
+      byStatus: statusStats,
+      byPriority: priorityStats
     });
     
   } catch (error) {
-    res.status(500).json({ error: 'Server error while restoring backup' });
+    res.status(500).json({ error: 'Server error while getting task statistics' });
   }
 });
 
