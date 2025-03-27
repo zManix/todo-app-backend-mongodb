@@ -1,0 +1,27 @@
+{
+  "name": "modul-165-nosql",
+  "version": "1.0.0",
+  "description": "This repository contains a NoSQL database implementation for a task management system using MongoDB. The database consists of three collections: Tasks, Folders, and Tags, with relationships between them as defined in the entity-relationship diagram.",
+  "main": "auth-test-queries.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zManix/todo-app-backend-mongodb.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/zManix/todo-app-backend-mongodb/issues"
+  },
+  "homepage": "https://github.com/zManix/todo-app-backend-mongodb#readme",
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "mongodb": "^6.15.0"
+  }
+}

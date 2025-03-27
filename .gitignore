@@ -1,3 +1,4 @@
 backup
 .env
 mongo-keyfile
+node_modules
