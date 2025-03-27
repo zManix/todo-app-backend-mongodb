@@ -94,8 +94,8 @@ router.post('/tasks', async (req, res) => {
     const { title, description, status, due_date, priority, folders, tags } = req.body;
     
     // Validate input
-    if (!title || !status) {
-      return res.status(400).json({ error: 'Title and status are required' });
+    if (!title) {
+      return res.status(400).json({ error: 'Title is required' });
     }
     
     // Convert string IDs to ObjectIds, but handle empty arrays and null values properly
@@ -124,17 +124,20 @@ router.post('/tasks', async (req, res) => {
       }).filter(id => id !== null);
     }
     
+    // Create a task object with only the required fields
     const task = {
       title,
-      description: description || "",
-      status,
-      due_date: due_date ? new Date(due_date) : null,
-      priority: priority || "medium",
       created_at: new Date(),
-      updated_at: new Date(),
-      folders: folderIds,
-      tags: tagIds
+      updated_at: new Date()
     };
+
+    // Only add optional fields if they exist in the request and are not null/undefined
+    if (description !== undefined && description !== null) task.description = description;
+    if (status !== undefined && status !== null) task.status = status;
+    if (due_date !== undefined && due_date !== null) task.due_date = new Date(due_date);
+    if (priority !== undefined && priority !== null) task.priority = priority;
+    if (folderIds.length > 0) task.folders = folderIds;
+    if (tagIds.length > 0) task.tags = tagIds;
     
     const result = await req.db.collection('tasks').insertOne(task);
     
